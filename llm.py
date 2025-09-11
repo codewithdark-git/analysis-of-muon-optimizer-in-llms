@@ -637,7 +637,7 @@ def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader
                         scheduler.step()
 
             # Logging
-            if step % 10 == 0:
+            if step % 100 == 0:
                 with torch.no_grad():
                     predictions = logits.argmax(dim=-1)
                     accuracy = (predictions == y).float().mean().item()
@@ -664,8 +664,8 @@ def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader
                 print(f"\n🧪 Milestone {step}: Val Loss: {eval_metrics['val_loss']:.4f}")
 
             step += 1
-            if step % 100 == 0:
-                pbar.update(100)
+            if step % 20 == 0:
+                pbar.update(20)
 
     pbar.close()
 
