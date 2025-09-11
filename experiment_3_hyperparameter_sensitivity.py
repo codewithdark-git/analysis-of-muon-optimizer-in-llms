@@ -516,8 +516,8 @@ def evaluate_model(model: nn.Module, val_loader: DataLoader, config: MoEModelCon
     model.train()
     return {'val_loss': avg_loss, 'val_accuracy': accuracy, 'val_perplexity': perplexity}
 
-def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig):
-    """Setup Muon optimizer with hybrid approach"""
+def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig, muon_lr=None, momentum=None, ns_steps=None):
+    """Setup Muon optimizer with specified hyperparameters"""
     muon_params = []
     adamw_params = []
 
@@ -533,15 +533,28 @@ def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig):
     print(f"  Muon parameters: {sum(p.numel() for p in muon_params):,}")
     print(f"  AdamW parameters: {sum(p.numel() for p in adamw_params):,}")
 
-    muon_optimizer = Muon(muon_params, lr=config.muon_lr, momentum=0.95)
-    adamw_optimizer = torch.optim.AdamW(adamw_params, lr=config.muon_lr*0.1, weight_decay=config.weight_decay)
+    # Use provided hyperparameters or defaults
+    lr = muon_lr if muon_lr is not None else config.muon_lr
+    mom = momentum if momentum is not None else 0.95
+    ns = ns_steps if ns_steps is not None else 5
+
+    muon_optimizer = Muon(muon_params, lr=lr, momentum=mom, ns_steps=ns)
+    adamw_optimizer = torch.optim.AdamW(adamw_params, lr=lr*0.1, weight_decay=config.weight_decay)
 
     return [muon_optimizer, adamw_optimizer]
 
 
-def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader):
-    """Train the MoE model"""
+def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader, 
+                   muon_lr=None, momentum=None, ns_steps=None):
+    """Train the MoE model with specified hyperparameters"""
     print(f"\n🚀 Training MoE model with {config.num_experts} experts (top-{config.expert_top_k})")
+    
+    if muon_lr is not None:
+        print(f"   Learning Rate: {muon_lr}")
+    if momentum is not None:
+        print(f"   Momentum: {momentum}")
+    if ns_steps is not None:
+        print(f"   Newton-Schulz Steps: {ns_steps}")
 
     # Initialize model
     set_seed(42)
@@ -561,7 +574,7 @@ def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader
     print(f"  📊 Parameter efficiency: {active_params/total_params:.1%} active per forward pass")
 
     # Setup optimizers
-    optimizers = setup_muon_optimizer(model, config)
+    optimizers = setup_muon_optimizer(model, config, muon_lr, momentum, ns_steps)
 
     # Learning rate schedule
     schedulers = []
@@ -710,26 +723,135 @@ if __name__ == "__main__":
 
     print(f"📊 Dataset: {len(train_dataset)} train, {len(val_dataset)} val samples")
 
-    # Train MoE model
-    print(f"\n{'='*60}")
-    print(f"🧪 TRAINING: Mixture of Experts Model")
-    print(f"{'='*60}")
+    # Experiment 3: Hyperparameter Sensitivity
+    print(f"\n{'='*80}")
+    print(f"🧪 EXPERIMENT 3: Muon Hyperparameter Sensitivity Analysis")
+    print(f"{'='*80}")
 
-    print(f"\n📋 MoE Model Configuration:")
+    print(f"\n📋 Model Configuration:")
     print(f"   Architecture: {config.d_model}d, {config.n_layers}L, {config.n_heads}H, {config.d_ff}ff")
     print(f"   MoE: {config.num_experts} experts, top-{config.expert_top_k} routing")
     print(f"   Training: {config.max_steps} steps, batch size {config.batch_size}")
     print(f"   Data: {config.max_tokens:,} tokens, seq_len {config.max_seq_len}")
 
-    # Train model
-    start_time = time.time()
-    model, final_metrics = train_moe_model(config, train_loader, val_loader)
-    total_time = time.time() - start_time
-
-    print(f"\n🎯 MoE Model Results:")
-    print(f"⏱️ Training time: {total_time/60:.1f} minutes")
-    print(f"🏆 Final Results:")
-    print(f"   Validation Loss: {final_metrics['val_loss']:.4f}")
-    print(f"   Validation Accuracy: {final_metrics['val_accuracy']:.4f}")
-    print(f"   Validation Perplexity: {final_metrics['val_perplexity']:.2f}")
+    # Define hyperparameter ranges
+    learning_rates = [0.001, 0.005, 0.01, 0.02, 0.05]
+    momentums = [0.9, 0.95, 0.99]
+    ns_steps_list = [3, 5, 7]
+    
+    results = {}
+    
+    # Sensitivity to Learning Rate
+    print(f"\n{'='*60}")
+    print(f"📈 Learning Rate Sensitivity Analysis")
     print(f"{'='*60}")
+    
+    lr_results = {}
+    for lr in learning_rates:
+        print(f"\n--- Testing Learning Rate: {lr} ---")
+        start_time = time.time()
+        model, final_metrics = train_moe_model(config, train_loader, val_loader, muon_lr=lr)
+        lr_time = time.time() - start_time
+        
+        lr_results[lr] = {
+            'metrics': final_metrics,
+            'time': lr_time
+        }
+        
+        print(f"LR {lr}: Loss={final_metrics['val_loss']:.4f}, "
+              f"Acc={final_metrics['val_accuracy']:.4f}, "
+              f"PPL={final_metrics['val_perplexity']:.2f}")
+    
+    results['learning_rate'] = lr_results
+    
+    # Sensitivity to Momentum
+    print(f"\n{'='*60}")
+    print(f"📈 Momentum Sensitivity Analysis")
+    print(f"{'='*60}")
+    
+    momentum_results = {}
+    for momentum in momentums:
+        print(f"\n--- Testing Momentum: {momentum} ---")
+        start_time = time.time()
+        model, final_metrics = train_moe_model(config, train_loader, val_loader, momentum=momentum)
+        momentum_time = time.time() - start_time
+        
+        momentum_results[momentum] = {
+            'metrics': final_metrics,
+            'time': momentum_time
+        }
+        
+        print(f"Momentum {momentum}: Loss={final_metrics['val_loss']:.4f}, "
+              f"Acc={final_metrics['val_accuracy']:.4f}, "
+              f"PPL={final_metrics['val_perplexity']:.2f}")
+    
+    results['momentum'] = momentum_results
+    
+    # Sensitivity to Newton-Schulz Steps
+    print(f"\n{'='*60}")
+    print(f"📈 Newton-Schulz Steps Sensitivity Analysis")
+    print(f"{'='*60}")
+    
+    ns_results = {}
+    for ns_steps in ns_steps_list:
+        print(f"\n--- Testing Newton-Schulz Steps: {ns_steps} ---")
+        start_time = time.time()
+        model, final_metrics = train_moe_model(config, train_loader, val_loader, ns_steps=ns_steps)
+        ns_time = time.time() - start_time
+        
+        ns_results[ns_steps] = {
+            'metrics': final_metrics,
+            'time': ns_time
+        }
+        
+        print(f"NS Steps {ns_steps}: Loss={final_metrics['val_loss']:.4f}, "
+              f"Acc={final_metrics['val_accuracy']:.4f}, "
+              f"PPL={final_metrics['val_perplexity']:.2f}")
+    
+    results['newton_schulz_steps'] = ns_results
+    
+    # Summary Analysis
+    print(f"\n{'='*80}")
+    print(f"📊 HYPERPARAMETER SENSITIVITY SUMMARY")
+    print(f"{'='*80}")
+    
+    # Learning Rate Analysis
+    print(f"\n🎯 Learning Rate Analysis:")
+    print(f"{'LR':<10} {'Val Loss':<12} {'Val Acc':<12} {'Val PPL':<12}")
+    print(f"{'-'*50}")
+    for lr, data in lr_results.items():
+        metrics = data['metrics']
+        print(f"{lr:<10.3f} {metrics['val_loss']:<12.4f} {metrics['val_accuracy']:<12.4f} {metrics['val_perplexity']:<12.2f}")
+    
+    # Momentum Analysis
+    print(f"\n🎯 Momentum Analysis:")
+    print(f"{'Momentum':<10} {'Val Loss':<12} {'Val Acc':<12} {'Val PPL':<12}")
+    print(f"{'-'*50}")
+    for momentum, data in momentum_results.items():
+        metrics = data['metrics']
+        print(f"{momentum:<10.2f} {metrics['val_loss']:<12.4f} {metrics['val_accuracy']:<12.4f} {metrics['val_perplexity']:<12.2f}")
+    
+    # Newton-Schulz Steps Analysis
+    print(f"\n🎯 Newton-Schulz Steps Analysis:")
+    print(f"{'NS Steps':<10} {'Val Loss':<12} {'Val Acc':<12} {'Val PPL':<12}")
+    print(f"{'-'*50}")
+    for ns_steps, data in ns_results.items():
+        metrics = data['metrics']
+        print(f"{ns_steps:<10} {metrics['val_loss']:<12.4f} {metrics['val_accuracy']:<12.4f} {metrics['val_perplexity']:<12.2f}")
+    
+    # Find optimal hyperparameters
+    best_lr = min(lr_results.keys(), key=lambda x: lr_results[x]['metrics']['val_loss'])
+    best_momentum = min(momentum_results.keys(), key=lambda x: momentum_results[x]['metrics']['val_loss'])
+    best_ns_steps = min(ns_results.keys(), key=lambda x: ns_results[x]['metrics']['val_loss'])
+    
+    print(f"\n🏆 Optimal Hyperparameters:")
+    print(f"   Best Learning Rate: {best_lr} (Loss: {lr_results[best_lr]['metrics']['val_loss']:.4f})")
+    print(f"   Best Momentum: {best_momentum} (Loss: {momentum_results[best_momentum]['metrics']['val_loss']:.4f})")
+    print(f"   Best Newton-Schulz Steps: {best_ns_steps} (Loss: {ns_results[best_ns_steps]['metrics']['val_loss']:.4f})")
+    
+    # Save results
+    import json
+    with open('experiment_3_results.json', 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"\n💾 Results saved to experiment_3_results.json")
+    print(f"{'='*80}")

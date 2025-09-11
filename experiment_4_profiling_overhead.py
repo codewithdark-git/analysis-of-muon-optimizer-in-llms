@@ -539,9 +539,10 @@ def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig):
     return [muon_optimizer, adamw_optimizer]
 
 
-def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader):
-    """Train the MoE model"""
-    print(f"\n🚀 Training MoE model with {config.num_experts} experts (top-{config.expert_top_k})")
+def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader, profile_steps=100):
+    """Profile the computational overhead of Muon optimizer components"""
+    print(f"\n🚀 Profiling Muon Optimizer Overhead")
+    print(f"   Profile Steps: {profile_steps}")
 
     # Initialize model
     set_seed(42)
@@ -579,12 +580,25 @@ def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader
 
     scaler = GradScaler() if config.use_amp else None
 
-    # Training loop
+    # Setup profiler
+    profiler = torch.profiler.profile(
+        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+        schedule=torch.profiler.schedule(wait=0, warmup=10, active=profile_steps, repeat=1),
+        on_trace_ready=torch.profiler.tensorboard_trace_handler('./profiler_logs'),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True
+    )
+
+    # Training loop with profiling
     model.train()
     step = 0
-    pbar = tqdm(total=config.max_steps, desc="Training MoE")
+    pbar = tqdm(total=profile_steps, desc="Profiling Muon Overhead")
 
-    while step < config.max_steps:
+    profiler.start()
+    
+    # Profile for limited steps
+    while step < profile_steps:
         for batch_idx, (x, y) in enumerate(train_loader):
             if step >= config.max_steps:
                 break
@@ -636,8 +650,11 @@ def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader
                     for scheduler in schedulers:
                         scheduler.step()
 
+            # Step profiler
+            profiler.step()
+
             # Logging
-            if step % 100 == 0:
+            if step % 10 == 0:
                 with torch.no_grad():
                     predictions = logits.argmax(dim=-1)
                     accuracy = (predictions == y).float().mean().item()
@@ -651,32 +668,60 @@ def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader
                     'ppl': f'{perplexity:.1f}'
                 })
 
-            # Evaluation
-            if step % config.eval_every == 0 and step > 0:
-                eval_metrics = evaluate_model(model, val_loader, config)
-                print(f"\nStep {step}: Val Loss: {eval_metrics['val_loss']:.4f}, "
-                      f"Val Acc: {eval_metrics['val_accuracy']:.4f}, "
-                      f"Val PPL: {eval_metrics['val_perplexity']:.2f}")
-
-            # Milestone evaluations
-            if step in getattr(config, 'log_milestones', ()):    
-                eval_metrics = evaluate_model(model, val_loader, config)
-                print(f"\n🧪 Milestone {step}: Val Loss: {eval_metrics['val_loss']:.4f}")
-
             step += 1
-            if step % 20 == 0:
-                pbar.update(20)
+            if step % 10 == 0:
+                pbar.update(10)
 
     pbar.close()
+    profiler.stop()
 
-    # Final evaluation
-    final_eval = evaluate_model(model, val_loader, config)
-    print(f"\n📊 Final Results:")
-    print(f"   Val Loss: {final_eval['val_loss']:.4f}")
-    print(f"   Val Accuracy: {final_eval['val_accuracy']:.4f}")
-    print(f"   Val Perplexity: {final_eval['val_perplexity']:.2f}")
-
-    return model, final_eval
+    # Analyze profiling results
+    print(f"\n📊 Profiling Analysis:")
+    
+    # Get profiler events
+    events = profiler.events()
+    
+    # Analyze Newton-Schulz overhead
+    ns_events = [e for e in events if 'zeropower_via_newtonschulz5' in e.name]
+    optimizer_events = [e for e in events if 'optimizer' in e.name.lower() or 'step' in e.name.lower()]
+    
+    total_ns_time = sum(e.cuda_time_total for e in ns_events) if ns_events else 0
+    total_optimizer_time = sum(e.cuda_time_total for e in optimizer_events) if optimizer_events else 0
+    
+    if total_optimizer_time > 0:
+        ns_overhead_percent = (total_ns_time / total_optimizer_time) * 100
+        print(f"   Newton-Schulz overhead: {ns_overhead_percent:.2f}% of optimizer time")
+        print(f"   Total Newton-Schulz time: {total_ns_time / 1000:.2f}ms")
+        print(f"   Total optimizer time: {total_optimizer_time / 1000:.2f}ms")
+    
+    # Memory analysis
+    memory_events = [e for e in events if e.cuda_memory_usage > 0]
+    max_memory = max(e.cuda_memory_usage for e in memory_events) if memory_events else 0
+    print(f"   Peak GPU memory usage: {max_memory / 1024**3:.2f} GB")
+    
+    # Performance metrics
+    print(f"\n📈 Performance Summary:")
+    print(f"   Profiled steps: {profile_steps}")
+    print(f"   Average step time: {(total_optimizer_time / profile_steps) / 1000:.2f}ms")
+    print(f"   Newton-Schulz calls per step: {len(ns_events) / profile_steps:.1f}")
+    
+    # Save profiling results
+    profiling_results = {
+        'total_ns_time': total_ns_time,
+        'total_optimizer_time': total_optimizer_time,
+        'ns_overhead_percent': ns_overhead_percent if total_optimizer_time > 0 else 0,
+        'max_memory_gb': max_memory / 1024**3,
+        'profiled_steps': profile_steps,
+        'avg_step_time_ms': (total_optimizer_time / profile_steps) / 1000,
+        'ns_calls_per_step': len(ns_events) / profile_steps
+    }
+    
+    import json
+    with open('experiment_4_profiling_results.json', 'w') as f:
+        json.dump(profiling_results, f, indent=2)
+    print(f"\n💾 Profiling results saved to experiment_4_profiling_results.json")
+    
+    return model, profiling_results
 
 if __name__ == "__main__":
     # Check system
@@ -710,26 +755,69 @@ if __name__ == "__main__":
 
     print(f"📊 Dataset: {len(train_dataset)} train, {len(val_dataset)} val samples")
 
-    # Train MoE model
-    print(f"\n{'='*60}")
-    print(f"🧪 TRAINING: Mixture of Experts Model")
-    print(f"{'='*60}")
+    # Experiment 4: Computational Overhead Profiling
+    print(f"\n{'='*80}")
+    print(f"🧪 EXPERIMENT 4: Muon Optimizer Computational Overhead Analysis")
+    print(f"{'='*80}")
 
-    print(f"\n📋 MoE Model Configuration:")
+    print(f"\n📋 Model Configuration:")
     print(f"   Architecture: {config.d_model}d, {config.n_layers}L, {config.n_heads}H, {config.d_ff}ff")
     print(f"   MoE: {config.num_experts} experts, top-{config.expert_top_k} routing")
-    print(f"   Training: {config.max_steps} steps, batch size {config.batch_size}")
+    print(f"   Profiling: 100 steps, batch size {config.batch_size}")
     print(f"   Data: {config.max_tokens:,} tokens, seq_len {config.max_seq_len}")
 
-    # Train model
+    # Profile Muon overhead
+    profile_steps = 100
     start_time = time.time()
-    model, final_metrics = train_moe_model(config, train_loader, val_loader)
-    total_time = time.time() - start_time
+    model, profiling_results = profile_muon_overhead(config, train_loader, val_loader, profile_steps)
+    profiling_time = time.time() - start_time
 
-    print(f"\n🎯 MoE Model Results:")
-    print(f"⏱️ Training time: {total_time/60:.1f} minutes")
-    print(f"🏆 Final Results:")
-    print(f"   Validation Loss: {final_metrics['val_loss']:.4f}")
-    print(f"   Validation Accuracy: {final_metrics['val_accuracy']:.4f}")
-    print(f"   Validation Perplexity: {final_metrics['val_perplexity']:.2f}")
-    print(f"{'='*60}")
+    print(f"\n🎯 Profiling Results:")
+    print(f"⏱️ Profiling time: {profiling_time/60:.1f} minutes")
+    print(f"🏆 Overhead Analysis:")
+    print(f"   Newton-Schulz overhead: {profiling_results['ns_overhead_percent']:.2f}% of optimizer time")
+    print(f"   Peak GPU memory: {profiling_results['max_memory_gb']:.2f} GB")
+    print(f"   Average step time: {profiling_results['avg_step_time_ms']:.2f}ms")
+    print(f"   Newton-Schulz calls per step: {profiling_results['ns_calls_per_step']:.1f}")
+    
+    # Cost-Benefit Analysis
+    print(f"\n{'='*80}")
+    print(f"💰 COST-BENEFIT ANALYSIS")
+    print(f"{'='*80}")
+    
+    ns_overhead = profiling_results['ns_overhead_percent']
+    if ns_overhead < 5:
+        cost_rating = "Low"
+    elif ns_overhead < 15:
+        cost_rating = "Medium"
+    else:
+        cost_rating = "High"
+    
+    print(f"Newton-Schulz overhead rating: {cost_rating} ({ns_overhead:.2f}%)")
+    print(f"Recommendation: {'Acceptable for most use cases' if ns_overhead < 10 else 'Consider optimization or alternative approaches'}")
+    
+    # Performance impact
+    step_time_ms = profiling_results['avg_step_time_ms']
+    if step_time_ms < 10:
+        perf_rating = "Fast"
+    elif step_time_ms < 50:
+        perf_rating = "Moderate"
+    else:
+        perf_rating = "Slow"
+    
+    print(f"Overall performance rating: {perf_rating} ({step_time_ms:.2f}ms per step)")
+    
+    # Memory efficiency
+    memory_gb = profiling_results['max_memory_gb']
+    if memory_gb < 4:
+        mem_rating = "Efficient"
+    elif memory_gb < 8:
+        mem_rating = "Moderate"
+    else:
+        mem_rating = "High usage"
+    
+    print(f"Memory efficiency rating: {mem_rating} ({memory_gb:.2f} GB peak)")
+    
+    print(f"\n💾 Profiling traces saved to ./profiler_logs/")
+    print(f"💾 Results saved to experiment_4_profiling_results.json")
+    print(f"{'='*80}")

@@ -561,9 +561,17 @@ def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig, variant="full
     return [muon_optimizer, adamw_optimizer]
 
 
-def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader):
-    """Train the MoE model"""
+def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader, variant="full"):
+    """Train the MoE model with specified Muon variant"""
+    variant_names = {
+        "full": "Full Muon (Momentum + Newton-Schulz)",
+        "no_newton_schulz": "Muon w/o Newton-Schulz (Momentum only)",
+        "no_momentum": "Muon w/o Momentum (Newton-Schulz only)",
+        "no_both": "Muon w/o Both (Basic SGD-like)"
+    }
+    
     print(f"\n🚀 Training MoE model with {config.num_experts} experts (top-{config.expert_top_k})")
+    print(f"   Variant: {variant_names.get(variant, variant)}")
 
     # Initialize model
     set_seed(42)
@@ -583,7 +591,7 @@ def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader
     print(f"  📊 Parameter efficiency: {active_params/total_params:.1%} active per forward pass")
 
     # Setup optimizers
-    optimizers = setup_muon_optimizer(model, config)
+    optimizers = setup_muon_optimizer(model, config, variant)
 
     # Learning rate schedule
     schedulers = []
@@ -732,26 +740,81 @@ if __name__ == "__main__":
 
     print(f"📊 Dataset: {len(train_dataset)} train, {len(val_dataset)} val samples")
 
-    # Train MoE model
-    print(f"\n{'='*60}")
-    print(f"🧪 TRAINING: Mixture of Experts Model")
-    print(f"{'='*60}")
+    # Experiment 2: Ablation Study
+    print(f"\n{'='*80}")
+    print(f"🧪 EXPERIMENT 2: Muon Optimizer Ablation Study")
+    print(f"{'='*80}")
 
-    print(f"\n📋 MoE Model Configuration:")
+    print(f"\n📋 Model Configuration:")
     print(f"   Architecture: {config.d_model}d, {config.n_layers}L, {config.n_heads}H, {config.d_ff}ff")
     print(f"   MoE: {config.num_experts} experts, top-{config.expert_top_k} routing")
     print(f"   Training: {config.max_steps} steps, batch size {config.batch_size}")
     print(f"   Data: {config.max_tokens:,} tokens, seq_len {config.max_seq_len}")
 
-    # Train model
-    start_time = time.time()
-    model, final_metrics = train_moe_model(config, train_loader, val_loader)
-    total_time = time.time() - start_time
+    # Define ablation variants
+    variants = ["full", "no_newton_schulz", "no_momentum", "no_both"]
+    variant_names = {
+        "full": "Full Muon (Momentum + Newton-Schulz)",
+        "no_newton_schulz": "Muon w/o Newton-Schulz (Momentum only)",
+        "no_momentum": "Muon w/o Momentum (Newton-Schulz only)",
+        "no_both": "Muon w/o Both (Basic SGD-like)"
+    }
+    
+    results = {}
+    
+    for variant in variants:
+        print(f"\n{'='*50}")
+        print(f"🚀 Training: {variant_names[variant]}")
+        print(f"{'='*50}")
+        
+        start_time = time.time()
+        model, final_metrics = train_moe_model(config, train_loader, val_loader, variant)
+        variant_time = time.time() - start_time
+        
+        results[variant] = {
+            'name': variant_names[variant],
+            'metrics': final_metrics,
+            'time': variant_time
+        }
+        
+        print(f"\n🎯 {variant_names[variant]} Results:")
+        print(f"⏱️ Training time: {variant_time/60:.1f} minutes")
+        print(f"🏆 Final Results:")
+        print(f"   Validation Loss: {final_metrics['val_loss']:.4f}")
+        print(f"   Validation Accuracy: {final_metrics['val_accuracy']:.4f}")
+        print(f"   Validation Perplexity: {final_metrics['val_perplexity']:.2f}")
 
-    print(f"\n🎯 MoE Model Results:")
-    print(f"⏱️ Training time: {total_time/60:.1f} minutes")
-    print(f"🏆 Final Results:")
-    print(f"   Validation Loss: {final_metrics['val_loss']:.4f}")
-    print(f"   Validation Accuracy: {final_metrics['val_accuracy']:.4f}")
-    print(f"   Validation Perplexity: {final_metrics['val_perplexity']:.2f}")
-    print(f"{'='*60}")
+    # Ablation Analysis
+    print(f"\n{'='*80}")
+    print(f"📊 ABLATION ANALYSIS")
+    print(f"{'='*80}")
+    print(f"{'Variant':<35} {'Val Loss':<12} {'Val Acc':<12} {'Val PPL':<12} {'Time (min)':<12}")
+    print(f"{'-'*85}")
+    
+    for variant in variants:
+        metrics = results[variant]['metrics']
+        name = variant_names[variant]
+        print(f"{name:<35} {metrics['val_loss']:<12.4f} {metrics['val_accuracy']:<12.4f} "
+              f"{metrics['val_perplexity']:<12.2f} {results[variant]['time']/60:<12.1f}")
+    
+    # Component Contribution Analysis
+    print(f"\n{'='*80}")
+    print(f"🔬 COMPONENT CONTRIBUTION ANALYSIS")
+    print(f"{'='*80}")
+    
+    full_loss = results['full']['metrics']['val_loss']
+    no_ns_loss = results['no_newton_schulz']['metrics']['val_loss']
+    no_mom_loss = results['no_momentum']['metrics']['val_loss']
+    no_both_loss = results['no_both']['metrics']['val_loss']
+    
+    print(f"Newton-Schulz contribution: {no_mom_loss - full_loss:.4f} (vs momentum-only)")
+    print(f"Momentum contribution: {no_ns_loss - full_loss:.4f} (vs NS-only)")
+    print(f"Combined contribution: {no_both_loss - full_loss:.4f} (vs neither)")
+    print(f"Synergy effect: {(no_ns_loss - full_loss) + (no_mom_loss - full_loss) - (no_both_loss - full_loss):.4f}")
+    
+    # Save results
+    import json
+    with open('experiment_2_results.json', 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"\n💾 Results saved to experiment_2_results.json")
+    print(f"{'='*80}")
