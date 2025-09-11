@@ -693,25 +693,10 @@ if __name__ == "__main__":
     texts, tokenizer, tokens = load_and_cache_data(temp_config)
     vocab_size = temp_config.vocab_size
 
-    # Test MoE model
-    config = MoEModelConfig(
-        # Base model parameters
-        d_model=384,
-        n_heads=8,
-        n_layers=6,
-        d_ff=1536,
-        batch_size=24,
-        max_steps=1000,
-        eval_every=10000000,
-        vocab_size=vocab_size,
+    # Use MoE config and set vocab_size
+    config = MoEModelConfig(vocab_size=vocab_size)
 
-        # MoE specific
-        num_experts=8,
-        expert_top_k=2,
-        load_balancing_weight=0.01
-    )
-
-    dataset = TextTokenDataset(tokens, temp_config.max_seq_len)
+    dataset = TextTokenDataset(tokens, config.max_seq_len)
 
     # Train/val split
     val_size = len(dataset) // 10
@@ -720,8 +705,8 @@ if __name__ == "__main__":
         dataset, [train_size, val_size], generator=torch.Generator().manual_seed(42)
     )
 
-    train_loader = DataLoader(train_dataset, batch_size=temp_config.batch_size, shuffle=True, num_workers=2)
-    val_loader = DataLoader(val_dataset, batch_size=temp_config.batch_size, shuffle=False, num_workers=2)
+    train_loader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False, num_workers=2)
 
     print(f"📊 Dataset: {len(train_dataset)} train, {len(val_dataset)} val samples")
 
