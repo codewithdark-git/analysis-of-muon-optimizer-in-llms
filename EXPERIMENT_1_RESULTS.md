@@ -1,54 +1,75 @@
 # Experiment 1: Muon vs AdamW Baseline Comparison - Results
 
-## Summary
-Initial results show **dramatic improvements** with Muon optimizer over AdamW baseline.
-
 ## Configuration
 - **Model**: MoE Transformer (384d, 6L, 8H, 1536ff)
 - **Training**: 1000 steps, batch size 24, gradient accumulation 4
 - **Data**: 500K tokens from SmolLM corpus
 - **Optimizers**: Muon (hybrid) vs AdamW (pure)
+- **Random Seed**: 42
 
-## Results
+## Measured Results
 
-| Metric | Muon | AdamW | Improvement |
-|--------|------|-------|-------------|
-| **Validation Loss** | 2.5371 | 5.0520 | **50% better** |
-| **Validation Accuracy** | 49.37% | 20.89% | **2.4x better** |
-| **Validation Perplexity** | 12.64 | 156.33 | **12x better** |
-| **Training Time** | 2.8 min | 2.3 min | +0.5 min |
+| Metric | Muon | AdamW | Difference |
+|--------|------|-------|------------|
+| **Validation Loss** | 0.0476 | 0.0547 | -0.0072 |
+| **Validation Accuracy** | 0.9907 | 0.9881 | +0.0026 |
+| **Validation Perplexity** | 1.05 | 1.06 | -0.01 |
+| **Training Time (minutes)** | 13.3 | 11.8 | +1.5 |
 
-## Key Observations
+## Training Details
 
-### 🎯 **Performance**
-- Muon achieves **much better convergence** in same training time
-- Validation loss difference is **substantial** (-2.51)
-- Accuracy improvement is **dramatic** (+28.5 percentage points)
+### Muon Optimizer
+- **Parameters using Muon**: 2D weight matrices only
+- **Parameters using AdamW**: embeddings, normalization layers
+- **Learning Rate**: 0.01
+- **Momentum**: 0.95
+- **Newton-Schulz Steps**: 5
 
-### ⏱️ **Efficiency** 
-- Only **21% longer training time** for much better results
-- Cost-benefit ratio is **excellent** (0.5 min extra for massive gains)
+### AdamW Optimizer  
+- **All parameters**: AdamW with learning rate 0.01
+- **Weight Decay**: 0.1
 
-### 📊 **Convergence Quality**
-- Muon: 12.64 perplexity (excellent for language modeling)
-- AdamW: 156.33 perplexity (poor convergence)
+## Computational Tradeoffs
 
-## Concerns & Next Steps
+### Training Time
+- Muon: 13.3 minutes
+- AdamW: 11.8 minutes  
+- Additional time for Muon: +1.5 minutes (+12.7%)
 
-### ⚠️ **Potential Issues**
-1. **Limited training steps** (1000) - models may not be fully converged
-2. **Small dataset** (500K tokens) - results may not generalize
-3. **Single run** - need multiple seeds for statistical significance
+### Memory Usage
+- Both optimizers used same GPU memory footprint
+- No additional memory overhead measured for Muon
 
-### 🔄 **Recommended Actions**
-1. **Increase training steps** to 5000-10000 for better convergence
-2. **Run remaining experiments** (ablation, hyperparams, profiling)
-3. **Multiple random seeds** for statistical validation
-4. **Larger dataset** for more robust conclusions
+## Training Progress
 
-## Conclusion
-**Initial results are extremely promising** - Muon shows dramatic improvements over AdamW with minimal computational overhead. However, these results need validation with longer training and larger datasets.
+### Evaluation Points
+- **Step 500**: Both models evaluated
+- **Step 1000**: Final evaluation (results above)
+
+### Convergence Behavior
+- Muon loss decreased from ~4.5 to 0.0476
+- AdamW loss decreased from ~6.2 to 0.0547
+- Both models showed decreasing loss throughout training
+- Both models achieved very low validation loss (< 0.06)
+
+## Experimental Limitations
+
+### Training Duration
+- 1000 steps may not represent full convergence
+- Only 2 evaluation points during training
+
+### Dataset Size
+- 500K tokens is relatively small for language modeling
+- Results may not generalize to larger datasets
+
+### Statistical Significance
+- Single run with fixed random seed (42)
+- No confidence intervals or multiple runs
+
+## Next Experiments
+- Experiment 2: Ablation study (component analysis)
+- Experiment 3: Hyperparameter sensitivity 
+- Experiment 4: Computational overhead profiling
 
 ---
-*Generated: $(date)*
-*Experiment: 1/4 Complete*
+*Generated: Experiment 1 Complete*

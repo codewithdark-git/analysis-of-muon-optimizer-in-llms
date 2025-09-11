@@ -539,7 +539,7 @@ def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig):
     return [muon_optimizer, adamw_optimizer]
 
 
-def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader, profile_steps=100):
+def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader, profile_steps=50):
     """Profile the computational overhead of Muon optimizer components"""
     print(f"\n🚀 Profiling Muon Optimizer Overhead")
     print(f"   Profile Steps: {profile_steps}")
@@ -678,43 +678,70 @@ def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_
     # Analyze profiling results
     print(f"\n📊 Profiling Analysis:")
     
-    # Get profiler events
-    events = profiler.events()
-    
-    # Analyze Newton-Schulz overhead
-    ns_events = [e for e in events if 'zeropower_via_newtonschulz5' in e.name]
-    optimizer_events = [e for e in events if 'optimizer' in e.name.lower() or 'step' in e.name.lower()]
-    
-    total_ns_time = sum(e.cuda_time_total for e in ns_events) if ns_events else 0
-    total_optimizer_time = sum(e.cuda_time_total for e in optimizer_events) if optimizer_events else 0
-    
-    if total_optimizer_time > 0:
-        ns_overhead_percent = (total_ns_time / total_optimizer_time) * 100
-        print(f"   Newton-Schulz overhead: {ns_overhead_percent:.2f}% of optimizer time")
-        print(f"   Total Newton-Schulz time: {total_ns_time / 1000:.2f}ms")
-        print(f"   Total optimizer time: {total_optimizer_time / 1000:.2f}ms")
-    
-    # Memory analysis
-    memory_events = [e for e in events if e.cuda_memory_usage > 0]
-    max_memory = max(e.cuda_memory_usage for e in memory_events) if memory_events else 0
-    print(f"   Peak GPU memory usage: {max_memory / 1024**3:.2f} GB")
-    
-    # Performance metrics
-    print(f"\n📈 Performance Summary:")
-    print(f"   Profiled steps: {profile_steps}")
-    print(f"   Average step time: {(total_optimizer_time / profile_steps) / 1000:.2f}ms")
-    print(f"   Newton-Schulz calls per step: {len(ns_events) / profile_steps:.1f}")
-    
-    # Save profiling results
-    profiling_results = {
-        'total_ns_time': total_ns_time,
-        'total_optimizer_time': total_optimizer_time,
-        'ns_overhead_percent': ns_overhead_percent if total_optimizer_time > 0 else 0,
-        'max_memory_gb': max_memory / 1024**3,
-        'profiled_steps': profile_steps,
-        'avg_step_time_ms': (total_optimizer_time / profile_steps) / 1000,
-        'ns_calls_per_step': len(ns_events) / profile_steps
-    }
+    try:
+        # Get profiler events with timeout
+        import time
+        start_analysis = time.time()
+        events = profiler.events()
+        analysis_time = time.time() - start_analysis
+        
+        print(f"   Profiler analysis took: {analysis_time:.2f}s")
+        
+        # Analyze Newton-Schulz overhead
+        ns_events = [e for e in events if 'zeropower_via_newtonschulz5' in e.name]
+        optimizer_events = [e for e in events if 'optimizer' in e.name.lower() or 'step' in e.name.lower()]
+        
+        total_ns_time = sum(e.cuda_time_total for e in ns_events) if ns_events else 0
+        total_optimizer_time = sum(e.cuda_time_total for e in optimizer_events) if optimizer_events else 0
+        
+        if total_optimizer_time > 0:
+            ns_overhead_percent = (total_ns_time / total_optimizer_time) * 100
+            print(f"   Newton-Schulz overhead: {ns_overhead_percent:.2f}% of optimizer time")
+            print(f"   Total Newton-Schulz time: {total_ns_time / 1000:.2f}ms")
+            print(f"   Total optimizer time: {total_optimizer_time / 1000:.2f}ms")
+        else:
+            ns_overhead_percent = 0
+            print(f"   Warning: Could not measure optimizer time")
+        
+        # Memory analysis
+        memory_events = [e for e in events if e.cuda_memory_usage > 0]
+        max_memory = max(e.cuda_memory_usage for e in memory_events) if memory_events else 0
+        print(f"   Peak GPU memory usage: {max_memory / 1024**3:.2f} GB")
+        
+        # Performance metrics
+        print(f"\n📈 Performance Summary:")
+        print(f"   Profiled steps: {profile_steps}")
+        print(f"   Average step time: {(total_optimizer_time / profile_steps) / 1000:.2f}ms")
+        print(f"   Newton-Schulz calls per step: {len(ns_events) / profile_steps:.1f}")
+        
+        # Save profiling results
+        profiling_results = {
+            'total_ns_time': total_ns_time,
+            'total_optimizer_time': total_optimizer_time,
+            'ns_overhead_percent': ns_overhead_percent if total_optimizer_time > 0 else 0,
+            'max_memory_gb': max_memory / 1024**3,
+            'profiled_steps': profile_steps,
+            'avg_step_time_ms': (total_optimizer_time / profile_steps) / 1000,
+            'ns_calls_per_step': len(ns_events) / profile_steps,
+            'analysis_time_s': analysis_time
+        }
+        
+    except Exception as e:
+        print(f"   Error in profiling analysis: {e}")
+        print(f"   Using fallback analysis...")
+        
+        # Fallback analysis without detailed profiler events
+        profiling_results = {
+            'total_ns_time': 0,
+            'total_optimizer_time': 0,
+            'ns_overhead_percent': 0,
+            'max_memory_gb': 0,
+            'profiled_steps': profile_steps,
+            'avg_step_time_ms': 0,
+            'ns_calls_per_step': 0,
+            'analysis_time_s': 0,
+            'error': str(e)
+        }
     
     import json
     with open('experiment_4_profiling_results.json', 'w') as f:
@@ -763,11 +790,11 @@ if __name__ == "__main__":
     print(f"\n📋 Model Configuration:")
     print(f"   Architecture: {config.d_model}d, {config.n_layers}L, {config.n_heads}H, {config.d_ff}ff")
     print(f"   MoE: {config.num_experts} experts, top-{config.expert_top_k} routing")
-    print(f"   Profiling: 100 steps, batch size {config.batch_size}")
+    print(f"   Profiling: 50 steps, batch size {config.batch_size}")
     print(f"   Data: {config.max_tokens:,} tokens, seq_len {config.max_seq_len}")
 
     # Profile Muon overhead
-    profile_steps = 100
+    profile_steps = 50
     start_time = time.time()
     model, profiling_results = profile_muon_overhead(config, train_loader, val_loader, profile_steps)
     profiling_time = time.time() - start_time
