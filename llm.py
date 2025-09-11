@@ -116,6 +116,8 @@ class Muon(torch.optim.Optimizer):
                 g = g.lerp_(buf, group["momentum"]) if group["nesterov"] else buf
                 g = zeropower_via_newtonschulz5(g, steps=group["ns_steps"])
                 p.add_(g.view_as(p), alpha=-group["lr"] * max(1, p.size(-2) / p.size(-1))**0.5)
+
+                ##
 	
 def load_and_cache_data(config: MoEModelConfig, cache_dir: str = "data_cache"):
     """Load and cache tokenized data to avoid reprocessing"""
