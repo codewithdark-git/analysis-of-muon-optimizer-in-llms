@@ -8,7 +8,11 @@
 \geometry{a4paper, margin=1in}
 
 \title{\textbf{Analysis of the Muon Optimizer in a Transformer Mixture-of-Experts Language Model}}
-\author{Vuk Rosić \\ Open Superintelligence Lab \\ Óbuda University \and [To Be Determined]}
+\author{
+    Vuk Rosić\textsuperscript{1,2}, [To Be Determined] \\
+    \textsuperscript{1}Open Superintelligence Lab \\
+    \textsuperscript{2}Óbuda University
+}
 \date{\today}
 
 \begin{document}
@@ -16,7 +20,7 @@
 \maketitle
 
 \begin{abstract}
-This paper presents a comprehensive analysis of the Muon optimizer, a novel optimization technique, within the context of training a Mixture-of-Experts (MoE) Large Language Model. We conduct a series of three experiments to evaluate its performance against the widely-used AdamW optimizer. The experiments include a direct baseline comparison, an ablation study of Muon's core components (Momentum and Newton-Schulz orthogonalization), and a hyperparameter sensitivity analysis. Our findings indicate that the hybrid Muon optimizer slightly outperforms AdamW in final validation loss and accuracy, but incurs a minor computational overhead. The ablation study reveals that both momentum and Newton-Schulz orthogonalization are critical for performance, with a strong synergistic effect. The hyperparameter analysis demonstrates that Muon is highly sensitive to the learning rate, with an optimal range between 0.02 and 0.05. This research provides empirical evidence for the viability of the Muon optimizer as a powerful alternative for training modern LLMs, offering insights into its operational characteristics and optimal configuration.
+This paper documents a series of experiments analyzing the Muon optimizer for training a Mixture-of-Experts (MoE) Large Language Model. As part of an ongoing research effort, we conduct three primary experiments: a direct baseline comparison against the AdamW optimizer, an ablation study of Muon's core components (Momentum and Newton-Schulz orthogonalization), and a hyperparameter sensitivity analysis. We present the preliminary results from these experiments, which characterize the optimizer's behavior under various conditions. This work is part of an active research project, and final conclusions are yet to be drawn. The aim is to provide a transparent account of our methodology and current findings.
 \end{abstract}
 
 \section{Introduction}
@@ -113,18 +117,25 @@ Newton-Schulz Steps & 7 (Loss: 2.4955) \\ \bottomrule
 
 The optimizer showed the highest sensitivity to the \textbf{learning rate}, with performance improving by 18.6x from the worst to the best-tested value. A higher learning rate of 0.05 was found to be optimal. The model was moderately sensitive to \textbf{momentum}, with 0.95 being the optimal value and 0.99 leading to degraded performance. Sensitivity to the number of \textbf{Newton-Schulz steps} was the weakest, with 7 steps performing best, but showing diminishing returns compared to 5 steps.
 
+\section{Summary of Results and Future Work}
+The experiments conducted provide preliminary data on the Muon optimizer's behavior. This research is ongoing, and the results presented here form the basis for further investigation.
 
-\section{Discussion}
-Our results suggest that the hybrid Muon optimizer is a viable and competitive alternative to AdamW for training MoE LLMs. The slight performance edge observed in Experiment 1 indicates its potential, though the increased training time is a trade-off to consider.
+\subsection{Summary of Current Results}
+\begin{itemize}
+    \item \textbf{Baseline Comparison}: The hybrid Muon optimizer achieved a marginally lower validation loss (0.0476) compared to AdamW (0.0547). This was accompanied by a 12.7\% increase in training time.
+    \item \textbf{Ablation Study}: Both momentum and Newton-Schulz orthogonalization were observed to be integral to the optimizer's performance. The removal of either component resulted in a significant increase in validation loss. The results also point towards a synergistic relationship between the two components.
+    \item \textbf{Hyperparameter Sensitivity}: The optimizer's performance is highly sensitive to the learning rate, with an optimal value found at 0.05 within the tested range. It showed moderate sensitivity to momentum (0.95 optimal) and weak sensitivity to the number of Newton-Schulz steps (7 optimal).
+\end{itemize}
 
-The ablation study highlights the sophisticated design of Muon; it is not merely a combination of existing techniques but a synergistic system where momentum and orthogonalization work in concert. This is a critical insight for future optimizer design.
-
-The hyperparameter analysis provides a practical guide for tuning Muon. The extreme sensitivity to learning rate, far more than to its other parameters, suggests that practitioners should prioritize tuning the learning rate when adopting this optimizer. The optimal rate of 0.05 is significantly higher than typical default learning rates for AdamW, highlighting a key difference in their operational characteristics.
-
-\section{Conclusion}
-In this paper, we conducted a systematic analysis of the Muon optimizer on a Mixture-of-Experts LLM. We found that Muon offers a slight performance advantage over AdamW at the cost of increased training time. Its core components, momentum and Newton-Schulz orthogonalization, are both critical and synergistic. The optimizer is highly sensitive to learning rate, and we identified an optimal range for this hyperparameter.
-
-Future work should involve testing on larger models and datasets to verify if these findings scale. Furthermore, a more in-depth analysis of the computational overhead with more robust profiling tools could help pinpoint optimization opportunities within the Newton-Schulz iteration itself.
+\subsection{Future Work}
+This research is active and continues to evolve. Future experiments planned include:
+\begin{itemize}
+    \item A comprehensive learning rate sweep for both Muon and AdamW to visualize their sensitivity curves and identify optimal operating ranges.
+    \item A detailed computational profiling analysis to precisely quantify the overhead of the Newton-Schulz iteration and identify potential optimization bottlenecks.
+    \item Scaling experiments on larger models and datasets to determine if the observed performance characteristics hold true for more complex training regimes.
+    \item Investigation into the interaction between hyperparameters, potentially through a grid search, to find a globally optimal configuration.
+\end{itemize}
+Final conclusions will be drawn upon the completion of these and subsequent experiments.
 
 \begin{thebibliography}{9}
 \bibitem{loshchilov2017decoupled}
