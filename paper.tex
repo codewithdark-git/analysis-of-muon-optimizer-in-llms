@@ -57,7 +57,7 @@ All experiments were conducted using a consistent setup to ensure comparability 
     \item \textbf{Model Architecture}: A 6-layer MoE Transformer with a model dimension of 384, 8 attention heads, and a feed-forward dimension of 1536. The model included 8 experts, with a top-2 routing strategy.
     \item \textbf{Dataset}: A 500,000 token subset of the SmolLM corpus.
     \item \textbf{Training}: All models were trained for 1000 steps with a batch size of 24 and 4 gradient accumulation steps.
-    \item \textbf{Hardware}: All experiments were run on a single NVIDIA GPU.
+    \item \textbf{Hardware}: Experiments were conducted in a low-compute environment, utilizing a single NVIDIA RTX 4090 GPU or a Google Colab T4 GPU. Future experiments may be upgraded to higher-compute environments.
 \end{itemize}
 
 \section{Results and Analysis}
