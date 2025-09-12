@@ -17,6 +17,9 @@ import os
 import pickle
 from torchtune.modules import RotaryPositionalEmbeddings
 warnings.filterwarnings('ignore')
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 def set_seed(seed: int = 42):
     """Set all random seeds for reproducibility"""
@@ -36,7 +39,7 @@ class MoEModelConfig:
     n_layers: int = 6
     d_ff: int = 1536
     batch_size: int = 24
-    max_steps: int = 1000
+    max_steps: int = 500
 
     # Training parameters
     gradient_accumulation_steps: int = 4
@@ -516,7 +519,7 @@ def evaluate_model(model: nn.Module, val_loader: DataLoader, config: MoEModelCon
     model.train()
     return {'val_loss': avg_loss, 'val_accuracy': accuracy, 'val_perplexity': perplexity}
 
-def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig):
+def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig, lr: float):
     """Setup Muon optimizer with hybrid approach"""
     muon_params = []
     adamw_params = []
@@ -533,16 +536,24 @@ def setup_muon_optimizer(model: nn.Module, config: MoEModelConfig):
     print(f"  Muon parameters: {sum(p.numel() for p in muon_params):,}")
     print(f"  AdamW parameters: {sum(p.numel() for p in adamw_params):,}")
 
-    muon_optimizer = Muon(muon_params, lr=config.muon_lr, momentum=0.95)
-    adamw_optimizer = torch.optim.AdamW(adamw_params, lr=config.muon_lr*0.1, weight_decay=config.weight_decay)
+    muon_optimizer = Muon(muon_params, lr=lr, momentum=0.95)
+    adamw_optimizer = torch.optim.AdamW(adamw_params, lr=lr*0.1, weight_decay=config.weight_decay)
 
     return [muon_optimizer, adamw_optimizer]
 
 
-def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader, profile_steps=50):
-    """Profile the computational overhead of Muon optimizer components"""
-    print(f"\n🚀 Profiling Muon Optimizer Overhead")
-    print(f"   Profile Steps: {profile_steps}")
+def setup_adamw_optimizer(model: nn.Module, config: MoEModelConfig, lr: float):
+    """Setup pure AdamW optimizer for baseline comparison"""
+    all_params = [p for p in model.parameters() if p.requires_grad]
+    print(f"  AdamW parameters: {sum(p.numel() for p in all_params):,}")
+    
+    optimizer = torch.optim.AdamW(all_params, lr=lr, weight_decay=config.weight_decay)
+    return [optimizer]
+
+
+def train_moe_model(config: MoEModelConfig, train_loader: DataLoader, val_loader: DataLoader, optimizer_type="muon", lr=None):
+    """Train the MoE model"""
+    print(f"\n🚀 Training MoE model with {optimizer_type.upper()} optimizer at LR={lr or config.muon_lr}")
 
     # Initialize model
     set_seed(42)
@@ -562,7 +573,13 @@ def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_
     print(f"  📊 Parameter efficiency: {active_params/total_params:.1%} active per forward pass")
 
     # Setup optimizers
-    optimizers = setup_muon_optimizer(model, config)
+    learning_rate = lr if lr is not None else config.muon_lr
+    if optimizer_type == "muon":
+        optimizers = setup_muon_optimizer(model, config, lr=learning_rate)
+    elif optimizer_type == "adamw":
+        optimizers = setup_adamw_optimizer(model, config, lr=learning_rate)
+    else:
+        raise ValueError(f"Unknown optimizer type: {optimizer_type}")
 
     # Learning rate schedule
     schedulers = []
@@ -580,25 +597,12 @@ def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_
 
     scaler = GradScaler() if config.use_amp else None
 
-    # Setup profiler
-    profiler = torch.profiler.profile(
-        activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
-        schedule=torch.profiler.schedule(wait=0, warmup=10, active=profile_steps, repeat=1),
-        on_trace_ready=torch.profiler.tensorboard_trace_handler('./profiler_logs'),
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True
-    )
-
-    # Training loop with profiling
+    # Training loop
     model.train()
     step = 0
-    pbar = tqdm(total=profile_steps, desc="Profiling Muon Overhead")
+    pbar = tqdm(total=config.max_steps, desc="Training MoE")
 
-    profiler.start()
-    
-    # Profile for limited steps
-    while step < profile_steps:
+    while step < config.max_steps:
         for batch_idx, (x, y) in enumerate(train_loader):
             if step >= config.max_steps:
                 break
@@ -650,11 +654,8 @@ def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_
                     for scheduler in schedulers:
                         scheduler.step()
 
-            # Step profiler
-            profiler.step()
-
             # Logging
-            if step % 10 == 0:
+            if step % 100 == 0:
                 with torch.no_grad():
                     predictions = logits.argmax(dim=-1)
                     accuracy = (predictions == y).float().mean().item()
@@ -668,87 +669,32 @@ def profile_muon_overhead(config: MoEModelConfig, train_loader: DataLoader, val_
                     'ppl': f'{perplexity:.1f}'
                 })
 
+            # Evaluation
+            if step % config.eval_every == 0 and step > 0:
+                eval_metrics = evaluate_model(model, val_loader, config)
+                print(f"\nStep {step}: Val Loss: {eval_metrics['val_loss']:.4f}, "
+                      f"Val Acc: {eval_metrics['val_accuracy']:.4f}, "
+                      f"Val PPL: {eval_metrics['val_perplexity']:.2f}")
+
+            # Milestone evaluations
+            if step in getattr(config, 'log_milestones', ()):    
+                eval_metrics = evaluate_model(model, val_loader, config)
+                print(f"\n🧪 Milestone {step}: Val Loss: {eval_metrics['val_loss']:.4f}")
+
             step += 1
-            if step % 10 == 0:
-                pbar.update(10)
+            if step % 20 == 0:
+                pbar.update(20)
 
     pbar.close()
-    profiler.stop()
 
-    # Analyze profiling results
-    print(f"\n📊 Profiling Analysis:")
-    
-    try:
-        # Get profiler events with timeout
-        import time
-        start_analysis = time.time()
-        events = profiler.events()
-        analysis_time = time.time() - start_analysis
-        
-        print(f"   Profiler analysis took: {analysis_time:.2f}s")
-        
-        # Analyze Newton-Schulz overhead
-        ns_events = [e for e in events if 'zeropower_via_newtonschulz5' in e.name]
-        optimizer_events = [e for e in events if 'optimizer' in e.name.lower() or 'step' in e.name.lower()]
-        
-        total_ns_time = sum(e.cuda_time_total for e in ns_events) if ns_events else 0
-        total_optimizer_time = sum(e.cuda_time_total for e in optimizer_events) if optimizer_events else 0
-        
-        if total_optimizer_time > 0:
-            ns_overhead_percent = (total_ns_time / total_optimizer_time) * 100
-            print(f"   Newton-Schulz overhead: {ns_overhead_percent:.2f}% of optimizer time")
-            print(f"   Total Newton-Schulz time: {total_ns_time / 1000:.2f}ms")
-            print(f"   Total optimizer time: {total_optimizer_time / 1000:.2f}ms")
-        else:
-            ns_overhead_percent = 0
-            print(f"   Warning: Could not measure optimizer time")
-        
-        # Memory analysis
-        memory_events = [e for e in events if e.cuda_memory_usage > 0]
-        max_memory = max(e.cuda_memory_usage for e in memory_events) if memory_events else 0
-        print(f"   Peak GPU memory usage: {max_memory / 1024**3:.2f} GB")
-        
-        # Performance metrics
-        print(f"\n📈 Performance Summary:")
-        print(f"   Profiled steps: {profile_steps}")
-        print(f"   Average step time: {(total_optimizer_time / profile_steps) / 1000:.2f}ms")
-        print(f"   Newton-Schulz calls per step: {len(ns_events) / profile_steps:.1f}")
-        
-        # Save profiling results
-        profiling_results = {
-            'total_ns_time': total_ns_time,
-            'total_optimizer_time': total_optimizer_time,
-            'ns_overhead_percent': ns_overhead_percent if total_optimizer_time > 0 else 0,
-            'max_memory_gb': max_memory / 1024**3,
-            'profiled_steps': profile_steps,
-            'avg_step_time_ms': (total_optimizer_time / profile_steps) / 1000,
-            'ns_calls_per_step': len(ns_events) / profile_steps,
-            'analysis_time_s': analysis_time
-        }
-        
-    except Exception as e:
-        print(f"   Error in profiling analysis: {e}")
-        print(f"   Using fallback analysis...")
-        
-        # Fallback analysis without detailed profiler events
-        profiling_results = {
-            'total_ns_time': 0,
-            'total_optimizer_time': 0,
-            'ns_overhead_percent': 0,
-            'max_memory_gb': 0,
-            'profiled_steps': profile_steps,
-            'avg_step_time_ms': 0,
-            'ns_calls_per_step': 0,
-            'analysis_time_s': 0,
-            'error': str(e)
-        }
-    
-    import json
-    with open('experiment_4_profiling_results.json', 'w') as f:
-        json.dump(profiling_results, f, indent=2)
-    print(f"\n💾 Profiling results saved to experiment_4_profiling_results.json")
-    
-    return model, profiling_results
+    # Final evaluation
+    final_eval = evaluate_model(model, val_loader, config)
+    print(f"\n📊 Final Results:")
+    print(f"   Val Loss: {final_eval['val_loss']:.4f}")
+    print(f"   Val Accuracy: {final_eval['val_accuracy']:.4f}")
+    print(f"   Val Perplexity: {final_eval['val_perplexity']:.2f}")
+
+    return model, final_eval
 
 if __name__ == "__main__":
     # Check system
@@ -782,69 +728,57 @@ if __name__ == "__main__":
 
     print(f"📊 Dataset: {len(train_dataset)} train, {len(val_dataset)} val samples")
 
-    # Experiment 4: Computational Overhead Profiling
-    print(f"\n{'='*80}")
-    print(f"🧪 EXPERIMENT 4: Muon Optimizer Computational Overhead Analysis")
-    print(f"{'='*80}")
+    # --- Learning Rate Sweep ---
+    print(f"\n{'='*60}")
+    print(f"🧪 STARTING EXPERIMENT 4: Learning Rate Sweep")
+    print(f"{'='*60}")
 
-    print(f"\n📋 Model Configuration:")
-    print(f"   Architecture: {config.d_model}d, {config.n_layers}L, {config.n_heads}H, {config.d_ff}ff")
-    print(f"   MoE: {config.num_experts} experts, top-{config.expert_top_k} routing")
-    print(f"   Profiling: 50 steps, batch size {config.batch_size}")
-    print(f"   Data: {config.max_tokens:,} tokens, seq_len {config.max_seq_len}")
+    learning_rates = [1e-4, 5e-4, 1e-3, 5e-3, 1e-2, 5e-2]
+    results = {"muon": {}, "adamw": {}}
 
-    # Profile Muon overhead
-    profile_steps = 50
-    start_time = time.time()
-    model, profiling_results = profile_muon_overhead(config, train_loader, val_loader, profile_steps)
-    profiling_time = time.time() - start_time
+    for lr in learning_rates:
+        print(f"\n--- Testing Learning Rate: {lr} ---")
 
-    print(f"\n🎯 Profiling Results:")
-    print(f"⏱️ Profiling time: {profiling_time/60:.1f} minutes")
-    print(f"🏆 Overhead Analysis:")
-    print(f"   Newton-Schulz overhead: {profiling_results['ns_overhead_percent']:.2f}% of optimizer time")
-    print(f"   Peak GPU memory: {profiling_results['max_memory_gb']:.2f} GB")
-    print(f"   Average step time: {profiling_results['avg_step_time_ms']:.2f}ms")
-    print(f"   Newton-Schulz calls per step: {profiling_results['ns_calls_per_step']:.1f}")
+        # Train with Muon
+        muon_model, muon_metrics = train_moe_model(config, train_loader, val_loader, optimizer_type="muon", lr=lr)
+        results["muon"][lr] = muon_metrics
+        
+        # Train with AdamW
+        adamw_model, adamw_metrics = train_moe_model(config, train_loader, val_loader, optimizer_type="adamw", lr=lr)
+        results["adamw"][lr] = adamw_metrics
+
+    # --- Analysis and Plotting ---
+    print(f"\n{'='*60}")
+    print(f"📊 Learning Rate Sweep Results")
+    print(f"{'='*60}")
+
+    muon_losses = [results["muon"][lr]['val_loss'] for lr in learning_rates]
+    adamw_losses = [results["adamw"][lr]['val_loss'] for lr in learning_rates]
+
+    print(f"{'Learning Rate':<15} {'Muon Val Loss':<15} {'AdamW Val Loss':<15}")
+    print("-" * 45)
+    for i, lr in enumerate(learning_rates):
+        print(f"{lr:<15.e} {muon_losses[i]:<15.4f} {adamw_losses[i]:<15.4f}")
+
+    # Plotting the results
+    plt.figure(figsize=(10, 6))
+    plt.plot(learning_rates, muon_losses, 'o-', label='Muon Optimizer')
+    plt.plot(learning_rates, adamw_losses, 's-', label='AdamW Optimizer')
+    plt.xscale('log')
+    plt.xlabel('Learning Rate (log scale)')
+    plt.ylabel('Final Validation Loss')
+    plt.title('Learning Rate Sensitivity: Muon vs. AdamW')
+    plt.legend()
+    plt.grid(True, which="both", ls="--")
     
-    # Cost-Benefit Analysis
-    print(f"\n{'='*80}")
-    print(f"💰 COST-BENEFIT ANALYSIS")
-    print(f"{'='*80}")
-    
-    ns_overhead = profiling_results['ns_overhead_percent']
-    if ns_overhead < 5:
-        cost_rating = "Low"
-    elif ns_overhead < 15:
-        cost_rating = "Medium"
-    else:
-        cost_rating = "High"
-    
-    print(f"Newton-Schulz overhead rating: {cost_rating} ({ns_overhead:.2f}%)")
-    print(f"Recommendation: {'Acceptable for most use cases' if ns_overhead < 10 else 'Consider optimization or alternative approaches'}")
-    
-    # Performance impact
-    step_time_ms = profiling_results['avg_step_time_ms']
-    if step_time_ms < 10:
-        perf_rating = "Fast"
-    elif step_time_ms < 50:
-        perf_rating = "Moderate"
-    else:
-        perf_rating = "Slow"
-    
-    print(f"Overall performance rating: {perf_rating} ({step_time_ms:.2f}ms per step)")
-    
-    # Memory efficiency
-    memory_gb = profiling_results['max_memory_gb']
-    if memory_gb < 4:
-        mem_rating = "Efficient"
-    elif memory_gb < 8:
-        mem_rating = "Moderate"
-    else:
-        mem_rating = "High usage"
-    
-    print(f"Memory efficiency rating: {mem_rating} ({memory_gb:.2f} GB peak)")
-    
-    print(f"\n💾 Profiling traces saved to ./profiler_logs/")
-    print(f"💾 Results saved to experiment_4_profiling_results.json")
-    print(f"{'='*80}")
+    # Save the plot
+    plot_filename = 'experiment_4_lr_sweep.png'
+    plt.savefig(plot_filename)
+    print(f"\n💾 Plot saved to {plot_filename}")
+
+    # Save results
+    import json
+    with open('experiment_4_results.json', 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"💾 Results saved to experiment_4_results.json")
+    print(f"{'='*60}")
