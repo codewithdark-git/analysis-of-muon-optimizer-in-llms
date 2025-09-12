@@ -758,7 +758,7 @@ if __name__ == "__main__":
     print(f"{'Learning Rate':<15} {'Muon Val Loss':<15} {'AdamW Val Loss':<15}")
     print("-" * 45)
     for i, lr in enumerate(learning_rates):
-        print(f"{lr:<15.e} {muon_losses[i]:<15.4f} {adamw_losses[i]:<15.4f}")
+        print(f"{lr:<15.2e} {muon_losses[i]:<15.4f} {adamw_losses[i]:<15.4f}")
 
     # Plotting the results
     plt.figure(figsize=(10, 6))

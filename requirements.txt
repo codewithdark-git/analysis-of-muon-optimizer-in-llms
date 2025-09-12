@@ -2,3 +2,4 @@ datasets
 transformers
 torchtune
 torchao
+matplotlib
