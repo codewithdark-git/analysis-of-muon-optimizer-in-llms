@@ -5,6 +5,7 @@
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{geometry}
+\usepackage{url}
 \geometry{a4paper, margin=1in}
 
 \title{\textbf{Analysis of the Muon Optimizer in a Transformer Mixture-of-Experts Language Model}}
@@ -24,7 +25,7 @@ This paper documents a series of experiments analyzing the Muon optimizer for tr
 \end{abstract}
 
 \section{Introduction}
-The field of Large Language Models (LLMs) has been dominated by optimizers from the Adam family, particularly AdamW \cite{loshchilov2017decoupled}. While effective, these methods can face challenges in stability and efficiency when scaling to increasingly large models. The Muon optimizer has emerged as a promising alternative, leveraging matrix-aware techniques, specifically Newton-Schulz orthogonalization, to potentially offer a more stable and efficient training process \cite{bernstein2020metricizing}.
+The field of Large Language Models (LLMs) has been dominated by optimizers from the Adam family, particularly AdamW \cite{loshchilov2017decoupled, kingma2014adam}. While effective, these methods can face challenges in stability and efficiency when scaling to increasingly large models. The Muon optimizer has emerged as a promising alternative, leveraging matrix-aware techniques, specifically Newton-Schulz orthogonalization, to potentially offer a more stable and efficient training process \cite{bernstein2020metricizing, liu2025muon, jordan2024muon}.\footnote{The code for this research is available at: \url{https://github.com/vukrosic/analysis-of-muon-optimizer-in-llms}}
 
 This paper investigates the practical performance of the Muon optimizer on a Mixture-of-Experts (MoE) transformer-based LLM. We aim to answer the following research questions:
 \begin{itemize}
@@ -37,10 +38,10 @@ To address these questions, we conduct a series of controlled experiments on a c
 
 \section{Background}
 \subsection{Mixture-of-Experts (MoE) Models}
-MoE models utilize a sparse activation strategy where only a fraction of the model's parameters are used for any given input. This is achieved through a "router" network that directs input tokens to a subset of "expert" networks. This architecture allows for a significant increase in model capacity without a proportional increase in computational cost per forward pass, making it an efficient choice for large-scale models.
+MoE models utilize a sparse activation strategy where only a fraction of the model's parameters are used for any given input \cite{shazeer2017outrageously}. This is achieved through a "router" network that directs input tokens to a subset of "expert" networks. This architecture allows for a significant increase in model capacity without a proportional increase in computational cost per forward pass, making it an efficient choice for large-scale models.
 
 \subsection{The Muon Optimizer}
-The Muon optimizer, short for MomentUm Orthogonalized by Newton-schulz, operates on entire matrices of parameters. Its key innovation is the use of the Newton-Schulz iteration to efficiently compute the orthogonalization of the gradient matrix. This process helps to maintain gradient stability and encourages a more uniform learning process across the network's layers. In our experiments, we employ a hybrid strategy where Muon is applied to the 2D weight matrices of the model, while AdamW is used for other parameters like embeddings and normalization layers.
+The Muon optimizer, short for MomentUm Orthogonalized by Newton-schulz, operates on entire matrices of parameters. Its key innovation is the use of the Newton-Schulz iteration to efficiently compute the orthogonalization of the gradient matrix \cite{schulz1933iteratives}. This process helps to maintain gradient stability and encourages a more uniform learning process across the network's layers. In our experiments, we employ a hybrid strategy where Muon is applied to the 2D weight matrices of the model, while AdamW is used for other parameters like embeddings and normalization layers.
 
 The core update step involves:
 \begin{enumerate}
@@ -138,16 +139,44 @@ This research is active and continues to evolve. Future experiments planned incl
 Final conclusions will be drawn upon the completion of these and subsequent experiments.
 
 \begin{thebibliography}{9}
-\bibitem{loshchilov2017decoupled}
-Ilya Loshchilov and Frank Hutter.
-\textit{Decoupled Weight Decay Regularization}.
-International Conference on Learning Representations (ICLR), 2019.
 
-\bibitem{bernstein2020metricizing}
-Jeremy Bernstein, et al.
-\textit{Metricizing Neural Networks}.
-arXiv preprint arXiv:2002.08771, 2020.
-
-\end{thebibliography}
+    \bibitem{loshchilov2017decoupled}
+    Ilya Loshchilov and Frank Hutter.
+    \textit{Decoupled Weight Decay Regularization}.
+    International Conference on Learning Representations (ICLR), 2019.  
+    \href{https://arxiv.org/abs/1711.05101}{arXiv:1711.05101}
+    
+    \bibitem{bernstein2020metricizing}
+    Jeremy Bernstein, et al.
+    \textit{On the Distance Between Two Neural Networks and the Stability of Learning}.  
+    \href{https://arxiv.org/abs/2002.03432}{arXiv:2002.03432}, 2020.
+    
+    \bibitem{kingma2014adam}
+    Diederik P. Kingma and Jimmy Ba.  
+    \textit{Adam: A Method for Stochastic Optimization}.  
+    \href{https://arxiv.org/abs/1412.6980}{arXiv:1412.6980}, 2014.
+    
+    \bibitem{shazeer2017outrageously}
+    Noam Shazeer, et al.  
+    \textit{Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer}.  
+    \href{https://arxiv.org/abs/1701.06538}{arXiv:1701.06538}, 2017.
+    
+    \bibitem{liu2025muon}
+    Jingyuan Liu, et al.  
+    \textit{Muon is Scalable for LLM Training}.  
+    \href{https://arxiv.org/abs/2502.16982}{arXiv:2502.16982}, 2025.
+    
+    \bibitem{jordan2024muon}
+    Keller Jordan.  
+    \textit{Muon: An optimizer for hidden layers in neural networks}.  
+    \url{https://kellerjordan.github.io/posts/muon/}, 2024.
+    
+    \bibitem{schulz1933iteratives}
+    G. Schulz.  
+    \textit{Iterative Berechnung der Reziproken Matrix}.  
+    Zeitschrift für Angewandte Mathematik und Mechanik, 13:57–59, 1933.
+    
+    \end{thebibliography}
+    
 
 \end{document}
