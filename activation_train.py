@@ -808,13 +808,17 @@ if __name__ == "__main__":
 
     print(f"📊 Dataset: {len(train_dataset)} train, {len(val_dataset)} val samples")
 
+    # FIXED: Set defaults for config when "both" to avoid assert
+    attention_type_arg = args.attention if args.attention != "both" else "mhsa"
+    activation_type_arg = args.activation if args.activation != "both" else "silu"
+
     # Create final config
     config = MoEModelConfig(
         vocab_size=vocab_size,
-        attention_type=args.attention,
+        attention_type=attention_type_arg,
         num_latents=args.num_latents,
         num_experts=args.num_experts,
-        activation_type=args.activation,  # NEW
+        activation_type=activation_type_arg,  # NEW
         max_steps=args.max_steps,
         batch_size=args.batch_size
     )
