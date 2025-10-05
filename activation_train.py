@@ -744,7 +744,7 @@ def compare_combinations(config: MoEModelConfig, train_loader: DataLoader, val_l
     
     # Summary table-like print
     print("Attention | Activation | Val Loss | Val PPL | Time (min) | Speedup vs MHSA-SiLU")
-    baseline_time = results["mhsa-sil"]["training_time"]
+    baseline_time = results["mhsa-silu"]["training_time"]
     for key in sorted(results):
         attn, act = key.split('-')
         r = results[key]
