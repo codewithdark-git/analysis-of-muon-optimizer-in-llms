@@ -2,7 +2,7 @@
 # 🧠 Analysis of Muon Optimizer in LLMs
 
 ![Status](https://img.shields.io/badge/Status-Active-success?logo=github&logoColor=white)
-![License](https://img.shields.io/badge/License-Apache%202.0-green)
+![License](https://img.shields.io/badge/License-MIT-green)
 ![Experiments](https://img.shields.io/badge/Experiments-6-orange)
 ![Last Updated](https://img.shields.io/badge/Updated-Oct%202025-lightgrey)
 
